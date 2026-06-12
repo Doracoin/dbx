@@ -43,6 +43,7 @@
     sqlSaveFailed: "Error al guardar el archivo: {message}",
     driverManager: "Administrador de drivers",
     updatableDriverCount: "Cantidad de drivers actualizables",
+    blockDangerousRedisCommands: "Bloquear comandos peligrosos",
   },
   updates: {
     title: "Actualizaciones",
@@ -1249,6 +1250,7 @@
     wordWrap: "Ajuste de línea",
     clearHistory: "Borrar historial de comandos",
     historyCleared: "Historial de comandos Redis borrado",
+    blockedCommand: "El comando {command} está bloqueado por seguridad. Desactiva el icono de escudo en la barra de herramientas para permitirlo.",
   },
   mongo: {
     documents: "{count} documentos",
@@ -1608,6 +1610,8 @@
     useCustomFont: "Usar “{font}”",
     languageTitle: "Idioma / Language",
     fontSize: "Tamaño de fuente",
+    toolbarTitle: "Barra de herramientas",
+    toolbarHiddenHint: "Los botones ocultos de la izquierda aparecerán en el menú «Más».",
     uiScale: "Escala de interfaz",
     uiScaleDescription: "Escala toda la interfaz de escritorio para pantallas de alta densidad. Los cambios se aplican al instante y se restauran al volver a abrir.",
     theme: "Tema",

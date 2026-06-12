@@ -63,7 +63,7 @@ import { resolveDefaultDatabase } from "@/lib/defaultDatabase";
 import { canTreeNodeShowExpander, treeItemPaddingLeft, usesFullWidthTreeLabel } from "@/lib/sidebarTreeItemLayout";
 import { buildTableSelectSql } from "@/lib/tableSelectSql";
 import { clearActiveTableReferencePayload, createTableReferencePayload, createTableReferenceDropEvent, setActiveTableReferencePayload, type QueryEditorTableReferencePayload } from "@/lib/queryEditorTableDrop";
-import { editablePrimaryKeys } from "@/lib/tableEditing";
+import { editablePrimaryKeys, usesSyntheticRowIdKey } from "@/lib/tableEditing";
 import { supportsDatabaseCreation, supportsDatabaseSearch, supportsFieldLineage, supportsObjectBrowserTreeNode, supportsSchemaDiagram, supportsSqlFileExecution, supportsTableImport, supportsTableTruncate, supportsTableStructureEditing, usesTreeSchemaMode } from "@/lib/databaseCapabilities";
 import { copyNameForTreeNode, objectSourceKindForTreeNode, sidebarSelectionCopyAction, treeNodeRowAction, treeNodeRowDoubleClickAction } from "@/lib/treeNodeClick";
 import { formatSqlInsert } from "@/lib/exportFormats";
@@ -219,6 +219,8 @@ function getIconInfo(node: TreeNode): { icon: any; colorClass: string } | null {
       return { icon: Database, colorClass: "text-yellow-500" };
     case "mongo-collection":
       return { icon: Table, colorClass: "text-green-400" };
+    case "elasticsearch-index":
+      return { icon: Table, colorClass: "text-emerald-400" };
     case "procedure":
       return { icon: ScrollText, colorClass: "text-blue-500" };
     case "function":
@@ -249,7 +251,7 @@ function getIconInfo(node: TreeNode): { icon: any; colorClass: string } | null {
 }
 
 const groupTypes: Set<TreeNodeType> = new Set(["group-columns", "group-indexes", "group-fkeys", "group-triggers", "group-tables", "group-views", "group-procedures", "group-functions", "group-sequences", "group-packages", "group-partitions"]);
-const pinnableTypes: Set<TreeNodeType> = new Set(["connection-group", "database", "schema", "table", "view", "redis-db", "mongo-db", "mongo-collection"]);
+const pinnableTypes: Set<TreeNodeType> = new Set(["connection-group", "database", "schema", "table", "view", "redis-db", "mongo-db", "mongo-collection", "elasticsearch-index"]);
 
 function isGroupLabel(node: TreeNode): boolean {
   return groupTypes.has(node.type);
@@ -263,13 +265,28 @@ function displayLabel(node: TreeNode): string {
 }
 
 function visibleLabel(node: TreeNode): string {
-  if (node.type === "table" || node.type === "view" || node.type === "mongo-collection") {
+  if (node.type === "table" || node.type === "view" || node.type === "mongo-collection" || node.type === "elasticsearch-index") {
     return sidebarDisplayTableName(node.label, settingsStore.editorSettings.sidebarHiddenTablePrefixes);
   }
   return displayLabel(node);
 }
 
+function cleanTooltipValue(value: string | null | undefined): string {
+  return String(value ?? "").trim();
+}
+
+const tableInfoTooltip = computed(() => {
+  const node = props.node;
+  if (node.type !== "table" && node.type !== "view") return null;
+  const rows = [
+    { label: t("structureEditor.tableName"), value: visibleLabel(node) },
+    { label: t("structureEditor.comment"), value: cleanTooltipValue(node.comment), multiline: true },
+  ].filter((row) => row.value);
+  return { rows };
+});
+
 function isTooltipDisabled(): boolean {
+  if (tableInfoTooltip.value?.rows.length) return isRenamingGroup.value;
   return isRenamingGroup.value || !isLabelTruncated();
 }
 
@@ -312,8 +329,10 @@ async function toggle() {
         await connectionStore.loadRedisDatabases(node.connectionId);
       } else if (config?.db_type === "etcd") {
         await connectionStore.loadEtcdRoot(node.connectionId);
-      } else if (config?.db_type === "mongodb" || config?.db_type === "elasticsearch") {
+      } else if (config?.db_type === "mongodb") {
         await connectionStore.loadMongoDatabases(node.connectionId);
+      } else if (config?.db_type === "elasticsearch") {
+        await connectionStore.loadElasticsearchIndices(node.connectionId);
       } else {
         await connectionStore.loadDatabases(node.connectionId);
       }
@@ -330,6 +349,9 @@ async function toggle() {
     } else if (node.type === "mongo-collection" && node.connectionId && node.database) {
       const tabTitle = `${node.database}.${node.label}`;
       const tab = queryStore.createTab(node.connectionId, node.database, tabTitle, "mongo");
+      queryStore.updateSql(tab, node.label);
+    } else if (node.type === "elasticsearch-index" && node.connectionId) {
+      const tab = queryStore.createTab(node.connectionId, node.database || "default", node.label, "mongo");
       queryStore.updateSql(tab, node.label);
     } else if (node.type === "database" && node.connectionId && hasTreeNodeDatabaseContext(node)) {
       const config = connectionStore.getConfig(node.connectionId);
@@ -678,56 +700,58 @@ async function openData() {
     const querySchema = connectionObjectTreeQuerySchema(config, node.database, tableSchema);
     const effectiveDbType = effectiveDatabaseTypeForConnection(config);
     const limit = settingsStore.editorSettings.pageSize;
+    let columns: ColumnInfo[] = [];
+    let primaryKeys: string[] = [];
+    try {
+      console.info("[DBX][openData:get-columns:start]", {
+        traceId,
+        database: node.database,
+        schema: querySchema,
+        table: node.label,
+        elapsed: elapsed(),
+      });
+      columns = await api.getColumns(node.connectionId, node.database, querySchema, node.label);
+      primaryKeys = editablePrimaryKeys(effectiveDbType, columns);
+      console.info("[DBX][openData:get-columns:done]", {
+        traceId,
+        columnCount: columns.length,
+        primaryKeys,
+        elapsed: elapsed(),
+      });
+      queryStore.setTableMeta(tabId, {
+        schema: tableSchema,
+        tableName: node.label,
+        columns,
+        primaryKeys,
+      });
+    } catch (error) {
+      console.warn("[DBX][openData:get-columns:error]", { traceId, elapsed: elapsed(), error });
+    }
+
+    const includeRowId = usesSyntheticRowIdKey(effectiveDbType, primaryKeys);
+    const fallbackOrderColumns = effectiveDbType === "sqlserver" && !primaryKeys.length ? columns.slice(0, 1).map((column) => column.name) : undefined;
     const sql = await buildTableSelectSql({
       databaseType: effectiveDbType,
       schema: tableSchema,
       tableName: node.label,
-      columns: [],
-      primaryKeys: [],
+      columns: columns.map((column) => column.name),
+      primaryKeys,
+      fallbackOrderColumns,
       limit,
-      includeRowId: false,
+      includeRowId,
     });
     console.info("[DBX][openData:sql-built]", {
       traceId,
-      primaryKeys: [],
-      includeRowId: false,
+      primaryKeys,
+      includeRowId,
       sql,
       elapsed: elapsed(),
     });
     queryStore.updateSql(tabId, sql);
 
-    const loadTableMeta = async () => {
-      try {
-        console.info("[DBX][openData:get-columns:start]", {
-          traceId,
-          database: node.database,
-          schema: querySchema,
-          table: node.label,
-          elapsed: elapsed(),
-        });
-        const columns = await api.getColumns(node.connectionId, node.database, querySchema, node.label);
-        console.info("[DBX][openData:get-columns:done]", {
-          traceId,
-          columnCount: columns.length,
-          primaryKeys: columns.filter((column) => column.is_primary_key).map((column) => column.name),
-          elapsed: elapsed(),
-        });
-        const pks = editablePrimaryKeys(effectiveDbType, columns);
-        queryStore.setTableMeta(tabId, {
-          schema: tableSchema,
-          tableName: node.label,
-          columns,
-          primaryKeys: pks,
-        });
-      } catch (error) {
-        console.warn("[DBX][openData:get-columns:error]", { traceId, elapsed: elapsed(), error });
-      }
-    };
-
     console.info("[DBX][openData:execute:start]", { traceId, tabId, elapsed: elapsed() });
     await queryStore.executeTabSql(tabId, sql);
     console.info("[DBX][openData:execute:done]", { traceId, tabId, elapsed: elapsed() });
-    void loadTableMeta();
   } catch (e: any) {
     console.error("[DBX][openData:error]", { traceId, elapsed: elapsed(), error: e });
     queryStore.setErrorResult(tabId, e);
@@ -2237,7 +2261,7 @@ const hasTypeMenu = computed(() => {
   return t === "connection" || t === "database" || t === "schema" || t === "table" || t === "view" || t === "column" || t === "procedure" || t === "function" || t === "package" || t === "package-body" || isGroupLabel(props.node);
 });
 const columnComment = computed(() => (props.node.type === "column" && props.node.meta && "comment" in props.node.meta ? (props.node.meta as any).comment : null));
-const tableComment = computed(() => ((props.node.type === "table" || props.node.type === "view" || props.node.type === "mongo-collection") && props.node.comment ? props.node.comment : null));
+const tableComment = computed(() => ((props.node.type === "table" || props.node.type === "view" || props.node.type === "mongo-collection" || props.node.type === "elasticsearch-index") && props.node.comment ? props.node.comment : null));
 const paddingLeft = computed(() => treeItemPaddingLeft(props.depth));
 const isConnected = computed(() => props.node.type === "connection" && !!props.node.connectionId && connectionStore.connectedIds.has(props.node.connectionId));
 const isConnectionReadonly = computed(() => props.node.type === "connection" && !!props.node.connectionId && (connectionStore.getConfig(props.node.connectionId)?.read_only ?? false));
@@ -2336,6 +2360,11 @@ function newConnectionInGroup() {
   connectionStore.startCreatingConnectionInGroup(props.node.id);
 }
 
+function newSubgroup() {
+  const groupId = connectionStore.createConnectionGroup(t("connectionGroup.newGroupDefault"), props.node.id);
+  connectionStore.selectedTreeNodeId = groupId;
+}
+
 function confirmDeleteGroup() {
   connectionStore.deleteConnectionGroup(props.node.id);
   showDeleteGroupConfirm.value = false;
@@ -2371,12 +2400,18 @@ const availableGroups = computed(() => connectionStore.sidebarLayout.groups);
 
 const currentGroupId = computed(() => {
   if (props.node.type !== "connection" || !props.node.connectionId) return null;
-  for (const entry of connectionStore.sidebarLayout.order) {
-    if (entry.type === "group" && entry.connectionIds.includes(props.node.connectionId)) {
-      return entry.id;
+  const find = (entries: typeof connectionStore.sidebarLayout.order): string | null => {
+    for (const entry of entries) {
+      if (entry.type !== "group") continue;
+      if ((entry.children ?? entry.connectionIds?.map((id) => ({ type: "connection" as const, id })) ?? []).some((child) => child.type === "connection" && child.id === props.node.connectionId)) {
+        return entry.id;
+      }
+      const found = find(entry.children ?? []);
+      if (found) return found;
     }
-  }
-  return null;
+    return null;
+  };
+  return find(connectionStore.sidebarLayout.order);
 });
 
 // --- Drag and Drop ---
@@ -2675,7 +2710,10 @@ function treeItemMenuItems(): ContextMenuItem[] {
 
   // 3. Connection Group
   if (node.type === "connection-group") {
+    items.push({ label: t("contextMenu.copyName"), action: copyName, icon: Copy, shortcut: shortcutCopyName.value });
+    items.push({ label: "", separator: true });
     items.push({ label: t("toolbar.newConnection"), action: newConnectionInGroup, icon: Plus });
+    items.push({ label: t("connectionGroup.newGroup"), action: newSubgroup, icon: FolderPlus });
     items.push({ label: "", separator: true });
     items.push({
       label: t("connectionGroup.renameGroup"),
@@ -2696,6 +2734,8 @@ function treeItemMenuItems(): ContextMenuItem[] {
 
   // 4. Database / Schema
   if (node.type === "database" || node.type === "schema") {
+    items.push({ label: t("contextMenu.copyName"), action: copyName, icon: Copy, shortcut: shortcutCopyName.value });
+    items.push({ label: "", separator: true });
     if (canOpenObjectBrowser.value) {
       items.push({ label: t("contextMenu.openObjectBrowser"), action: openObjectBrowser, icon: TableProperties });
     }
@@ -2785,6 +2825,14 @@ function treeItemMenuItems(): ContextMenuItem[] {
       items.push({ label: "", separator: true });
       items.push({ label: t("redis.flushDb"), action: flushRedisDb, icon: Eraser, variant: "destructive" as const });
     }
+    return items;
+  }
+
+  if (node.type === "elasticsearch-index") {
+    items.push({ label: t("contextMenu.copyName"), action: copyName, icon: Copy, shortcut: shortcutCopyName.value });
+    items.push({ label: "", separator: true });
+    items.push({ label: t("contextMenu.viewData"), action: toggle, icon: TableProperties });
+    items.push({ label: t("contextMenu.newQuery"), action: newQuery, icon: TerminalSquare });
     return items;
   }
 
@@ -3053,6 +3101,19 @@ function treeItemMenuItems(): ContextMenuItem[] {
             <Pin class="w-3 h-3" :class="{ 'fill-current': isPinned }" />
           </button>
         </div>
+        <template v-if="tableInfoTooltip" #content>
+          <div class="w-max min-w-40 max-w-[min(28rem,calc(100vw-24px))] rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-lg">
+            <div class="space-y-1">
+              <div v-for="row in tableInfoTooltip.rows" :key="row.label" class="grid grid-cols-[max-content_minmax(0,1fr)] gap-2 text-[11px] leading-4">
+                <span class="text-muted-foreground">{{ row.label }}</span>
+                <span v-if="row.multiline" class="max-h-20 overflow-hidden whitespace-pre-wrap break-words text-foreground/90">
+                  {{ row.value }}
+                </span>
+                <span v-else class="truncate font-mono text-foreground/90" :title="row.value">{{ row.value }}</span>
+              </div>
+            </div>
+          </div>
+        </template>
       </LightTooltip>
     </div>
   </CustomContextMenu>

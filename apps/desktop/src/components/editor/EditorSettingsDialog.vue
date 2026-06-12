@@ -2,7 +2,7 @@
 import { ref, watch, shallowRef, computed, onMounted } from "vue";
 import type { EditorView as EditorViewType } from "@codemirror/view";
 import { useI18n } from "vue-i18n";
-import { AlertTriangle, CheckCircle2, CircleHelp, Cloud, Copy, Download, ExternalLink, Loader2, PackageSearch, Pencil, RefreshCw, RotateCcw, Settings, Terminal, Trash2, Upload, X } from "@lucide/vue";
+import { AlertTriangle, CheckCircle2, CircleHelp, Cloud, Copy, Download, ExternalLink, Loader2, Moon, PackageSearch, Pencil, RefreshCw, RotateCcw, Settings, Sun, SunMoon, Terminal, Trash2, Upload, X } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import {
   useSettingsStore,
   AI_PROVIDER_PRESETS,
@@ -56,7 +56,7 @@ import { LOCALE_OPTIONS } from "@/lib/localeOptions";
 const { t } = useI18n();
 const settingsStore = useSettingsStore();
 const connectionStore = useConnectionStore();
-const { isDark } = useTheme();
+const { isDark, themeMode, setThemeMode } = useTheme();
 
 const props = defineProps<{
   open: boolean;
@@ -104,6 +104,7 @@ const editSidebarHiddenTablePrefixes = ref(settingsStore.editorSettings.sidebarH
 const editSidebarHideTableComments = ref(settingsStore.editorSettings.sidebarHideTableComments);
 const editSidebarAllowHorizontalScroll = ref(settingsStore.editorSettings.sidebarAllowHorizontalScroll);
 const editExportBatchSize = ref(settingsStore.editorSettings.exportBatchSize);
+const editToolbarItems = ref({ ...settingsStore.editorSettings.toolbarItems });
 const redisScanPageSizeOptions = [200, 1000, 5000, 10000];
 const systemFonts = ref<string[]>([]);
 const systemFontsLoading = ref(false);
@@ -263,6 +264,7 @@ watch(
       editSidebarHideTableComments.value = settingsStore.editorSettings.sidebarHideTableComments;
       editSidebarAllowHorizontalScroll.value = settingsStore.editorSettings.sidebarAllowHorizontalScroll;
       editExportBatchSize.value = settingsStore.editorSettings.exportBatchSize;
+      editToolbarItems.value = { ...settingsStore.editorSettings.toolbarItems };
       editSnippets.value = settingsStore.editorSettings.snippets.map((s) => ({ ...s }));
       void loadSystemFontOptions();
     }
@@ -314,6 +316,7 @@ function hasChanges(): boolean {
     editSidebarHideTableComments.value !== settingsStore.editorSettings.sidebarHideTableComments ||
     editSidebarAllowHorizontalScroll.value !== settingsStore.editorSettings.sidebarAllowHorizontalScroll ||
     editExportBatchSize.value !== settingsStore.editorSettings.exportBatchSize ||
+    JSON.stringify(editToolbarItems.value) !== JSON.stringify(settingsStore.editorSettings.toolbarItems) ||
     JSON.stringify(normalizeSidebarHiddenTablePrefixes(editSidebarHiddenTablePrefixes.value)) !== JSON.stringify(settingsStore.editorSettings.sidebarHiddenTablePrefixes) ||
     JSON.stringify(editSnippets.value) !== JSON.stringify(settingsStore.editorSettings.snippets)
   );
@@ -349,6 +352,7 @@ async function persistSettings() {
     sidebarAllowHorizontalScroll: editSidebarAllowHorizontalScroll.value,
     sidebarHiddenTablePrefixes: normalizeSidebarHiddenTablePrefixes(editSidebarHiddenTablePrefixes.value),
     exportBatchSize: editExportBatchSize.value,
+    toolbarItems: { ...editToolbarItems.value },
     snippets: editSnippets.value,
   });
   await settingsStore.updateDesktopSettings({
@@ -401,6 +405,7 @@ function resetDefaults() {
   editSidebarAllowHorizontalScroll.value = DEFAULT_EDITOR_SETTINGS.sidebarAllowHorizontalScroll;
   editSidebarHiddenTablePrefixes.value = DEFAULT_EDITOR_SETTINGS.sidebarHiddenTablePrefixes.join("\n");
   editExportBatchSize.value = DEFAULT_EDITOR_SETTINGS.exportBatchSize;
+  editToolbarItems.value = { ...DEFAULT_EDITOR_SETTINGS.toolbarItems };
   editSnippets.value = DEFAULT_SQL_SNIPPETS.map((s) => ({ ...s }));
 }
 
@@ -1433,6 +1438,29 @@ watch(
                 </Select>
               </div>
 
+              <div class="space-y-2">
+                <Label>{{ t("settings.theme") }}</Label>
+                <div class="flex gap-2">
+                  <Button
+                    v-for="option in [
+                      { value: 'light', label: t('toolbar.themeLight'), icon: Sun },
+                      { value: 'dark', label: t('toolbar.themeDark'), icon: Moon },
+                      { value: 'system', label: t('toolbar.themeSystem'), icon: SunMoon },
+                    ]"
+                    :key="option.value"
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    class="h-auto gap-1.5 px-3 py-1.5"
+                    :class="themeMode === option.value ? 'border-blue-300 ring-2 ring-blue-300/50' : ''"
+                    @click="setThemeMode(option.value as 'light' | 'dark' | 'system')"
+                  >
+                    <component :is="option.icon" class="h-3.5 w-3.5" />
+                    {{ option.label }}
+                  </Button>
+                </div>
+              </div>
+
               <Separator />
 
               <div class="space-y-2">
@@ -1577,6 +1605,46 @@ watch(
                     </p>
                   </div>
                   <Switch id="compact-column-header-actions" v-model="editCompactColumnHeaderActions" />
+                </div>
+              </div>
+
+              <Separator />
+
+              <div class="space-y-2">
+                <div class="flex items-center gap-2">
+                  <Label>{{ t("settings.toolbarTitle") }}</Label>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <CircleHelp class="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent class="max-w-64">
+                        <p>{{ t("settings.toolbarHiddenHint") }}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+                <div class="grid grid-cols-3 gap-2 mt-2">
+                  <div
+                    v-for="item in [
+                      { key: 'dataTransfer', label: t('transfer.dataTransfer') },
+                      { key: 'driverManager', label: t('toolbar.driverManager') },
+                      { key: 'sqlFile', label: t('sqlFile.title') },
+                      { key: 'schemaDiff', label: t('diff.title') },
+                      { key: 'dataCompare', label: t('dataCompare.title') },
+                      { key: 'checkUpdates', label: t('updates.check') },
+                      { key: 'sqlLibrary', label: t('sqlLibrary.title') },
+                      { key: 'history', label: t('history.title') },
+                      { key: 'ai', label: 'AI' },
+                      { key: 'theme', label: t('toolbar.theme') },
+                      { key: 'github', label: 'GitHub' },
+                    ]"
+                    :key="item.key"
+                    class="flex items-center gap-2"
+                  >
+                    <Switch :id="`toolbar-${item.key}`" :model-value="(editToolbarItems as any)[item.key]" @update:model-value="(v: boolean) => ((editToolbarItems as any)[item.key] = v)" />
+                    <Label :for="`toolbar-${item.key}`" class="text-sm cursor-pointer">{{ item.label }}</Label>
+                  </div>
                 </div>
               </div>
             </section>

@@ -33,7 +33,7 @@ function preloadDataGridComponent() {
 const DataGrid = defineAsyncComponent(loadDataGridComponent);
 const RedisKeyBrowser = defineAsyncComponent(() => import("@/components/redis/RedisKeyBrowser.vue"));
 const EtcdKeyBrowser = defineAsyncComponent(() => import("@/components/etcd/EtcdKeyBrowser.vue"));
-const MongoDocBrowser = defineAsyncComponent(() => import("@/components/mongo/MongoDocBrowser.vue"));
+const DocumentBrowser = defineAsyncComponent(() => import("@/components/document/DocumentBrowser.vue"));
 const ObjectBrowser = defineAsyncComponent(() => import("@/components/objects/ObjectBrowser.vue"));
 const TableStructureEditor = defineAsyncComponent(() => import("@/components/structure/TableStructureEditor.vue"));
 const DatabaseUserAdmin = defineAsyncComponent(() => import("@/components/admin/DatabaseUserAdmin.vue"));
@@ -46,6 +46,7 @@ import { isTableDataEditable } from "@/lib/tableEditing";
 import { tableMetaForDataTab } from "@/lib/tableDataTabMeta";
 import { formatShortcut } from "@/lib/shortcutRegistry";
 import { effectiveDatabaseTypeForConnection } from "@/lib/jdbcDialect";
+import { chartableColumnIndexes } from "@/lib/chartData";
 import { useTabScroll } from "@/composables/useTabScroll";
 import type { QueryTab, ConnectionConfig } from "@/types/database";
 import type { SqlFormatDialect } from "@/lib/sqlFormatter";
@@ -203,7 +204,7 @@ const resultTabsScrollbarThumbStyle = computed<CSSProperties>(() => ({
 const hasNumericData = computed(() => {
   const r = props.activeTab.result;
   if (!r || r.rows.length === 0) return false;
-  return r.columns.some((_, idx) => r.rows.some((row) => typeof row[idx] === "number"));
+  return chartableColumnIndexes(r).length > 0;
 });
 
 const activeQueryError = computed(() => {
@@ -424,8 +425,8 @@ defineExpose({ focusSearch, refreshData, handleModRTarget });
   <div class="flex flex-col flex-1 min-h-0">
     <!-- Query mode: editor + results -->
     <template v-if="activeTab.mode === 'query'">
-      <Splitpanes horizontal class="flex-1">
-        <Pane :size="resultsPaneOpen ? 40 : 100" :min-size="resultsPaneOpen ? 15 : 100">
+      <Splitpanes horizontal class="query-output-splitpanes flex-1 min-h-0 overflow-hidden">
+        <Pane class="min-h-0" :size="resultsPaneOpen ? 40 : 100" :min-size="resultsPaneOpen ? 15 : 100">
           <div class="h-full flex flex-col relative">
             <QueryEditor
               ref="queryEditorRef"
@@ -460,7 +461,7 @@ defineExpose({ focusSearch, refreshData, handleModRTarget });
             </Button>
           </div>
         </Pane>
-        <Pane v-if="resultsPaneOpen" :size="60" :min-size="20">
+        <Pane v-if="resultsPaneOpen" class="min-h-0" :size="60" :min-size="20">
           <div class="h-full flex flex-col">
             <div v-if="hasQueryOutput" class="flex h-10 shrink-0 items-center gap-1 border-b bg-muted/20 px-2">
               <div class="flex shrink-0 items-center gap-1">
@@ -820,10 +821,10 @@ defineExpose({ focusSearch, refreshData, handleModRTarget });
       </div>
     </template>
 
-    <!-- MongoDB mode: document browser -->
+    <!-- Document mode: MongoDB collections and Elasticsearch indices -->
     <template v-else-if="activeTab.mode === 'mongo'">
       <div class="flex-1 min-h-0">
-        <MongoDocBrowser :key="activeTab.id" :connection-id="activeTab.connectionId" :database="activeTab.database" :collection="activeTab.sql" />
+        <DocumentBrowser :key="activeTab.id" :connection-id="activeTab.connectionId" :database="activeTab.database" :collection="activeTab.sql" :database-type="activeEffectiveDatabaseType" />
       </div>
     </template>
 
@@ -860,6 +861,15 @@ defineExpose({ focusSearch, refreshData, handleModRTarget });
 </template>
 
 <style scoped>
+.query-output-splitpanes {
+  isolation: isolate;
+}
+
+.query-output-splitpanes :deep(> .splitpanes__splitter) {
+  z-index: 1;
+  flex: 0 0 3px;
+}
+
 .result-tab-scroll::-webkit-scrollbar {
   display: none;
 }

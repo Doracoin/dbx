@@ -43,6 +43,7 @@
     sqlSaveFailed: "Falha ao salvar o arquivo: {message}",
     driverManager: "Gerenciador de Drivers",
     updatableDriverCount: "Quantidade de drivers atualizáveis",
+    blockDangerousRedisCommands: "Bloquear comandos perigosos",
   },
   updates: {
     title: "Atualizações",
@@ -1361,6 +1362,7 @@
     wordWrap: "Quebra de linha",
     clearHistory: "Limpar histórico de comandos",
     historyCleared: "Histórico de comandos Redis limpo",
+    blockedCommand: "O comando {command} está bloqueado por segurança. Desative o ícone de escudo na barra de ferramentas para permiti-lo.",
   },
   mongo: {
     documents: "{count} documentos",
@@ -1725,6 +1727,8 @@
     useCustomFont: "Usar “{font}”",
     languageTitle: "Idioma / 语言",
     fontSize: "Tamanho da fonte",
+    toolbarTitle: "Barra de ferramentas",
+    toolbarHiddenHint: "Os botões ocultos à esquerda aparecerão no menu «Mais».",
     uiScale: "Escala da UI",
     uiScaleDescription: "Dimensione toda a UI do desktop para telas de alta resolução (high-DPI). As alterações são aplicadas imediatamente e restauradas na próxima inicialização.",
     theme: "Tema",

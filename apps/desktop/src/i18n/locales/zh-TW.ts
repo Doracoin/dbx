@@ -43,6 +43,7 @@
     sqlSaveFailed: "儲存檔案失敗：{message}",
     driverManager: "驅動程式管理器",
     updatableDriverCount: "可更新驅動程式數量",
+    blockDangerousRedisCommands: "攔截危險命令",
   },
   updates: {
     title: "更新",
@@ -1338,6 +1339,7 @@
     wordWrap: "自動換行",
     clearHistory: "清除命令歷史",
     historyCleared: "Redis 命令歷史已清除",
+    blockedCommand: "命令 {command} 因安全原因已被攔截。點擊工具列盾牌圖示可關閉攔截。",
   },
   mongo: {
     documents: "{count} 個文件",
@@ -1700,6 +1702,8 @@
     useCustomFont: "使用「{font}」",
     languageTitle: "語言 / Language",
     fontSize: "字級",
+    toolbarTitle: "工具列",
+    toolbarHiddenHint: "關閉的左側按鈕會自動收進「更多」下拉選單。",
     uiScale: "介面縮放",
     uiScaleDescription: "按比例縮放整個桌面端介面，適合高 DPI 螢幕；修改後立即生效，並在下次啟動時復原。",
     theme: "主題",
